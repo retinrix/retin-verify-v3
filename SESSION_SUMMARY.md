@@ -46,13 +46,20 @@
 ### Document Detection Training (YOLOX)
 **Current Status:** Debugging dataset path issues in Colab
 
-**Last Error:** `FileNotFoundError: [Errno 2] No such file or directory: '/content/dataset/algerian_id_cards/annotations/train/annotations.json'`
+**Last Error:** `FileNotFoundError: [Errno 2] No such file or directory: '/content/dataset_coco/annotations/instances_train2017.json'`
 
-**Fix Applied:** Updated notebook to:
-1. Extract zip file properly
-2. Restructure to COCO format (`dataset_coco/train2017/`, `dataset_coco/val2017/`, `dataset_coco/annotations/`)
-3. Convert annotations to proper COCO format
-4. Update config to use correct paths
+**Root Cause:** The COCO annotation file was not being created because the source `annotations.json` files were not found during restructuring.
+
+**Fix Applied:** Updated notebook with:
+1. **Debug cell** - Added a cell to search for zip files in Google Drive
+2. **Better error handling** - Verifies zip file exists before extraction
+3. **Verbose extraction** - Uses `unzip -o` instead of `unzip -q` to see errors
+4. **Path validation** - Checks if `dataset_raw` exists before processing
+5. **Flexible structure detection** - Handles both nested and flat folder structures
+6. **Annotation file validation** - Added explicit checks for annotation files with detailed error messages
+7. **JSON validation** - Verifies created COCO annotation files are valid
+
+**Additional Fix:** Fixed JSON syntax error (extra quote at line 224)
 
 **Next Step:** Re-run the updated notebook in Colab
 
