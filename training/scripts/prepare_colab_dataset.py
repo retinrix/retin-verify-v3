@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+import sys
 import json
 import random
 import argparse
@@ -19,6 +20,13 @@ import shutil
 from pathlib import Path
 from PIL import Image
 import zipfile
+
+
+def resolve_path(path):
+    """Resolve a path, following symlinks if present."""
+    p = Path(path)
+    # Resolve to absolute path and follow symlinks
+    return p.resolve()
 
 
 def create_coco_annotation(image_files, output_path):
@@ -70,15 +78,38 @@ def create_coco_annotation(image_files, output_path):
 def prepare_dataset(input_dir, output_dir, train_ratio=0.8, seed=42):
     """Prepare dataset for Colab training."""
     
-    input_path = Path(input_dir)
-    output_path = Path(output_dir)
+    # Resolve paths (follow symlinks)
+    input_path = resolve_path(input_dir)
+    output_path = Path(output_dir).resolve()
     
-    # Find all images
-    image_extensions = {'.jpg', '.jpeg', '.png', '.bmp'}
-    image_files = [
-        f for f in input_path.iterdir()
-        if f.suffix.lower() in image_extensions and f.is_file()
-    ]
+    print(f"Input directory: {input_path}")
+    print(f"Output directory: {output_path}")
+    
+    # Check if input path exists
+    if not input_path.exists():
+        print(f"❌ Input directory does not exist: {input_path}")
+        return False
+    
+    # Check if it's a symlink and report
+    if Path(input_dir).is_symlink():
+        print(f"  (Resolved from symlink: {input_dir} -> {input_path})")
+    
+    # Find all images (including in subdirectories)
+    image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff'}
+    image_files = []
+    
+    print(f"\nScanning for images in {input_path}...")
+    
+    # Walk through directory tree
+    for ext in image_extensions:
+        image_files.extend(input_path.rglob(f'*{ext}'))
+        image_files.extend(input_path.rglob(f'*{ext.upper()}'))
+    
+    # Filter to only files (not symlinks to directories)
+    image_files = [f for f in image_files if f.is_file()]
+    
+    # Remove duplicates (in case of multiple extensions matching)
+    image_files = list(dict.fromkeys(image_files))
     
     if not image_files:
         print(f"❌ No images found in {input_dir}")
@@ -106,12 +137,18 @@ def prepare_dataset(input_dir, output_dir, train_ratio=0.8, seed=42):
     # Copy train images
     print("\nCopying train images...")
     for img_file in train_files:
-        shutil.copy2(img_file, train_dir / img_file.name)
+        try:
+            shutil.copy2(img_file, train_dir / img_file.name)
+        except Exception as e:
+            print(f"  Warning: Failed to copy {img_file}: {e}")
     
     # Copy val images
     print("Copying val images...")
     for img_file in val_files:
-        shutil.copy2(img_file, val_dir / img_file.name)
+        try:
+            shutil.copy2(img_file, val_dir / img_file.name)
+        except Exception as e:
+            print(f"  Warning: Failed to copy {img_file}: {e}")
     
     # Create annotations
     print("\nCreating annotations...")
@@ -219,6 +256,9 @@ Examples:
   # Basic usage
   python prepare_colab_dataset.py --input-dir ~/Pictures/id_cards --output-dir ./dataset
 
+  # With symlink (e.g., mounted drive)
+  python prepare_colab_dataset.py -i /mnt/d/dataset_280326 -o ./dataset
+
   # Custom train/val split
   python prepare_colab_dataset.py -i ~/Pictures/id_cards -o ./dataset --train-ratio 0.85
 
@@ -228,7 +268,7 @@ Examples:
     )
     
     parser.add_argument('-i', '--input-dir', required=True,
-                        help='Directory containing ID card images')
+                        help='Directory containing ID card images (symlinks will be followed)')
     parser.add_argument('-o', '--output-dir', default='./dataset',
                         help='Output directory (default: ./dataset)')
     parser.add_argument('--train-ratio', type=float, default=0.8,
