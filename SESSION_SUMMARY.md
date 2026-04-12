@@ -156,7 +156,25 @@ python scripts/prepare_colab_dataset.py -i /mnt/d/dataset_280326 -o ./dataset --
 
 ## 📝 Notes for Next Session
 
-1. The updated notebook (`colab/yolox_document_detection.ipynb`) should handle all dataset path issues automatically
+### Getting the Updated Notebook
+The notebook has been updated with CUDA diagnostic cells. Make sure you're using the latest version:
+
+1. **Download the updated notebook** from GitHub:
+   ```bash
+   # In Colab, run this in a new cell to get the latest version:
+   !wget https://raw.githubusercontent.com/retinrix/retin-verify-v3/main/colab/yolox_document_detection.ipynb
+   ```
+
+2. **Or re-upload** `colab/yolox_document_detection.ipynb` from local to Colab
+
+### New Quick Test Workflow
+
+**Cell 2** (QUICK CUDA DIAGNOSTIC) - Run this FIRST (5 seconds):
+- ✅ If it says "GPU is ready!" → Continue to Cell 4 (Clone YOLOX)
+- ❌ If it fails → Run Cell 3 (Fix), then **Runtime > Restart runtime**, then Cell 2 again
+
+### Important Reminders
+1. The updated notebook should handle all dataset path issues automatically
 2. If training fails again, check the COCO restructuring cell output for errors
 3. Training takes 2-3 hours on Colab GPU - ensure stable connection
 4. Model will be saved to `MyDrive/models/yolox_idcard.onnx`
