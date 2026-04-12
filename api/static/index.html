@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Retin-Verify V3 - ID Verification</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#2563eb">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🔐</span>
+                <span class="logo-text">Retin-Verify</span>
+            </div>
+            <div class="version">v3.0</div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Capture View -->
+            <div id="capture-view" class="view active">
+                <div class="camera-container">
+                    <video id="camera-feed" autoplay playsinline></video>
+                    <canvas id="overlay-canvas"></canvas>
+                    
+                    <!-- Document Guide -->
+                    <div class="document-guide" id="doc-guide">
+                        <div class="guide-frame">
+                            <div class="corner tl"></div>
+                            <div class="corner tr"></div>
+                            <div class="corner bl"></div>
+                            <div class="corner br"></div>
+                        </div>
+                        <p class="guide-text">Position ID card within frame</p>
+                    </div>
+                    
+                    <!-- Quality Indicators -->
+                    <div class="quality-indicators">
+                        <div class="indicator" id="blur-indicator">
+                            <span class="icon">📷</span>
+                            <span class="label">Focus</span>
+                            <div class="bar"><div class="fill"></div></div>
+                        </div>
+                        <div class="indicator" id="light-indicator">
+                            <span class="icon">💡</span>
+                            <span class="label">Light</span>
+                            <div class="bar"><div class="fill"></div></div>
+                        </div>
+                        <div class="indicator" id="position-indicator">
+                            <span class="icon">🎯</span>
+                            <span class="label">Position</span>
+                            <div class="bar"><div class="fill"></div></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Mode Selector -->
+                <div class="mode-selector">
+                    <button class="mode-btn active" data-mode="auto">Auto</button>
+                    <button class="mode-btn" data-mode="front">Front</button>
+                    <button class="mode-btn" data-mode="back">Back</button>
+                </div>
+                
+                <!-- Capture Controls -->
+                <div class="capture-controls">
+                    <button id="flash-btn" class="control-btn" title="Toggle Flash">
+                        <span class="icon">⚡</span>
+                    </button>
+                    <button id="capture-btn" class="capture-btn" title="Capture">
+                        <div class="shutter"></div>
+                    </button>
+                    <button id="switch-btn" class="control-btn" title="Switch Camera">
+                        <span class="icon">🔄</span>
+                    </button>
+                </div>
+                
+                <!-- Upload Alternative -->
+                <div class="upload-section">
+                    <span class="or">or</span>
+                    <label class="upload-btn">
+                        <input type="file" id="file-input" accept="image/*" hidden>
+                        <span class="icon">📁</span> Upload Image
+                    </label>
+                </div>
+            </div>
+
+            <!-- Processing View -->
+            <div id="processing-view" class="view">
+                <div class="processing-content">
+                    <div class="spinner"></div>
+                    <h2>Verifying ID...</h2>
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <p class="stage-text" id="stage-text">Initializing...</p>
+                    </div>
+                    <div class="stage-indicators">
+                        <div class="stage" data-stage="document_detection">
+                            <span class="icon">📄</span>
+                            <span class="label">Document</span>
+                        </div>
+                        <div class="stage" data-stage="mrz_extraction">
+                            <span class="icon">🔤</span>
+                            <span class="label">MRZ</span>
+                        </div>
+                        <div class="stage" data-stage="face_extraction">
+                            <span class="icon">👤</span>
+                            <span class="label">Face</span>
+                        </div>
+                        <div class="stage" data-stage="security_analysis">
+                            <span class="icon">🔒</span>
+                            <span class="label">Security</span>
+                        </div>
+                        <div class="stage" data-stage="tampering_detection">
+                            <span class="icon">🔍</span>
+                            <span class="label">Tampering</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results View -->
+            <div id="results-view" class="view">
+                <div class="results-content">
+                    <!-- Result Header -->
+                    <div class="result-header">
+                        <div class="status-badge" id="status-badge">
+                            <span class="icon">✓</span>
+                            <span class="text">VERIFIED</span>
+                        </div>
+                        <button class="close-btn" id="close-results">×</button>
+                    </div>
+                    
+                    <!-- Document Preview -->
+                    <div class="document-preview">
+                        <div class="preview-container">
+                            <img id="result-image" src="" alt="ID Card">
+                            <div class="face-extract">
+                                <img id="face-image" src="" alt="Face">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Extracted Data -->
+                    <div class="extracted-data">
+                        <h3>Extracted Information</h3>
+                        <div class="data-grid">
+                            <div class="data-item">
+                                <label>Document Number</label>
+                                <span id="doc-number">-</span>
+                            </div>
+                            <div class="data-item">
+                                <label>Date of Birth</label>
+                                <span id="dob">-</span>
+                            </div>
+                            <div class="data-item">
+                                <label>Expiry Date</label>
+                                <span id="expiry">-</span>
+                            </div>
+                            <div class="data-item">
+                                <label>Name</label>
+                                <span id="name">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Security Analysis -->
+                    <div class="security-analysis">
+                        <h3>Security Analysis</h3>
+                        <div class="security-grid">
+                            <div class="security-item" id="hologram-check">
+                                <span class="icon">✓</span>
+                                <span class="label">Hologram</span>
+                            </div>
+                            <div class="security-item" id="laser-check">
+                                <span class="icon">✓</span>
+                                <span class="label">Laser Features</span>
+                            </div>
+                            <div class="security-item" id="ela-check">
+                                <span class="icon">✓</span>
+                                <span class="label">ELA Check</span>
+                            </div>
+                            <div class="security-item" id="copymove-check">
+                                <span class="icon">✓</span>
+                                <span class="label">Copy-Move</span>
+                            </div>
+                        </div>
+                        <div class="security-score">
+                            <div class="score-circle">
+                                <svg viewBox="0 0 36 36">
+                                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                    <path class="circle-progress" id="score-circle" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                                </svg>
+                                <div class="score-value" id="security-score">0%</div>
+                            </div>
+                            <span class="score-label">Security Score</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Processing Details -->
+                    <div class="processing-details">
+                        <h3>Processing Details</h3>
+                        <div class="details-grid">
+                            <div class="detail-item">
+                                <label>Processing Time</label>
+                                <span id="proc-time">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Document Confidence</label>
+                                <span id="doc-conf">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <label>MRZ Valid</label>
+                                <span id="mrz-valid">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <label>Face Quality</label>
+                                <span id="face-quality">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="result-actions">
+                        <button class="action-btn secondary" id="save-btn">
+                            <span class="icon">💾</span> Save
+                        </button>
+                        <button class="action-btn secondary" id="share-btn">
+                            <span class="icon">📤</span> Share
+                        </button>
+                        <button class="action-btn primary" id="verify-another">
+                            <span class="icon">📷</span> Verify Another
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Secure ID Verification powered by AI</p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
