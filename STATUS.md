@@ -85,7 +85,7 @@ If using the prep script: Upload algerian_id_cards.zip and extract
 Or drag & drop the algerian_id_cards/ folder
 Verify structure:
 
-MyDrive/datasets/algerian_id_cards/
+MyDrive/retin-verify/v3/algerian_id_cards/
 ├── train/
 │   ├── images/          ← Your training images (.jpg)
 │   └── annotations.json ← COCO format annotations
@@ -140,7 +140,7 @@ Model Size	~30MB
 🔧 Troubleshooting
 Issue	Solution
 Out of memory in Colab	Reduce batch size: -b 8 or use input_size = (416, 416)
-Dataset not found	Verify Drive mount and path: /content/drive/MyDrive/datasets/algerian_id_cards/
+Dataset not found	Verify Drive mount and path: /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/
 Low accuracy	Need more images (min 500) or check annotations
 Model not saving	Ensure Drive has space; check mount with drive.mount('/content/drive', force_remount=True)
 📖 Detailed Documentation
@@ -230,7 +230,7 @@ Step 4: Verify Dataset Path
 Check your dataset is accessible:
 
 # List dataset contents
-!ls -la /content/drive/MyDrive/datasets/algerian_id_cards/
+!ls -la /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/
 
 # Should show:
 # train/
@@ -238,7 +238,7 @@ Check your dataset is accessible:
 If your path is different, update the path in the notebook cell:
 
 # Change this line in the notebook:
-!cp -r /content/drive/MyDrive/datasets/algerian_id_cards/* /content/dataset/
+!cp -r /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/* /content/dataset/
 
 # To match your actual path, e.g.:
 !cp -r /content/drive/MyDrive/datasets/dataset_280326/* /content/dataset/

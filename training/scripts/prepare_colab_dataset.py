@@ -197,7 +197,7 @@ dataset/
 
 3. Verify structure:
    ```
-   MyDrive/datasets/algerian_id_cards/
+   MyDrive/retin-verify/v3/algerian_id_cards/
    ├── train/
    │   ├── images/
    │   └── annotations.json
@@ -295,7 +295,7 @@ Examples:
             print("Next Steps:")
             print(f"{'='*60}")
             print(f"1. Upload {zip_path} to Google Drive")
-            print(f"2. Extract in Drive: MyDrive/datasets/algerian_id_cards/")
+            print(f"2. Extract in Drive: MyDrive/retin-verify/v3/algerian_id_cards/")
             print(f"3. Open colab/yolox_document_detection.ipynb")
             print(f"4. Run training cells")
     else:

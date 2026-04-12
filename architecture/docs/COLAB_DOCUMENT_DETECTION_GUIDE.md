@@ -165,10 +165,10 @@ gdrive upload --recursive algerian_id_cards/
 ### 2.3 Verify Upload
 
 Check that your Drive has:
-- ✅ `MyDrive/datasets/algerian_id_cards/train/images/` with .jpg files
-- ✅ `MyDrive/datasets/algerian_id_cards/train/annotations.json`
-- ✅ `MyDrive/datasets/algerian_id_cards/val/images/` with .jpg files
-- ✅ `MyDrive/datasets/algerian_id_cards/val/annotations.json`
+- ✅ `MyDrive/retin-verify/v3/algerian_id_cards/train/images/` with .jpg files
+- ✅ `MyDrive/retin-verify/v3/algerian_id_cards/train/annotations.json`
+- ✅ `MyDrive/retin-verify/v3/algerian_id_cards/val/images/` with .jpg files
+- ✅ `MyDrive/retin-verify/v3/algerian_id_cards/val/annotations.json`
 
 ---
 
@@ -217,8 +217,8 @@ When prompted:
 
 ```python
 # Check dataset is accessible
-!ls -la /content/drive/MyDrive/datasets/algerian_id_cards/train/images/ | head -10
-!cat /content/drive/MyDrive/datasets/algerian_id_cards/train/annotations.json | head -50
+!ls -la /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/train/images/ | head -10
+!cat /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/train/annotations.json | head -50
 ```
 
 ---
@@ -245,7 +245,7 @@ When prompted:
 ```python
 # Faster training when data is local
 !mkdir -p /content/dataset
-!cp -r /content/drive/MyDrive/datasets/algerian_id_cards/* /content/dataset/
+!cp -r /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/* /content/dataset/
 ```
 
 ### 4.4 Create Custom Config
@@ -496,7 +496,7 @@ self.test_size = (416, 416)
 **Solution:**
 ```python
 # Verify path
-!ls -la /content/drive/MyDrive/datasets/algerian_id_cards/
+!ls -la /content/drive/MyDrive/retin-verify/v3/algerian_id_cards/
 
 # Check mount
 from google.colab import drive
