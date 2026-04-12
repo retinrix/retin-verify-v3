@@ -44,20 +44,22 @@
 ## 🔄 In Progress
 
 ### Document Detection Training (YOLOX)
-**Current Status:** Debugging dataset path issues in Colab
+**Current Status:** Debugging PyTorch/CUDA compatibility in Colab
 
-**Last Error:** `FileNotFoundError: [Errno 2] No such file or directory: '/content/dataset_coco/annotations/instances_train2017.json'`
+**Last Error:** `AttributeError: module 'torch._C' has no attribute '_cuda_setDevice'`
 
-**Root Cause:** The COCO annotation file was not being created because the source `annotations.json` files were not found during restructuring.
+**Root Cause:** PyTorch was being reinstalled with CUDA 12.1 (`cu121`), but Colab already has PyTorch with CUDA pre-installed. Reinstalling causes version mismatches.
 
-**Fix Applied:** Updated notebook with:
-1. **Debug cell** - Added a cell to search for zip files in Google Drive
-2. **Better error handling** - Verifies zip file exists before extraction
-3. **Verbose extraction** - Uses `unzip -o` instead of `unzip -q` to see errors
-4. **Path validation** - Checks if `dataset_raw` exists before processing
-5. **Flexible structure detection** - Handles both nested and flat folder structures
-6. **Annotation file validation** - Added explicit checks for annotation files with detailed error messages
-7. **JSON validation** - Verifies created COCO annotation files are valid
+**Fix Applied:** 
+1. **Removed PyTorch reinstallation** - Use Colab's pre-installed PyTorch with CUDA
+2. **Added CUDA check** - Verify CUDA availability before training
+3. **Debug cell** - Added a cell to search for zip files in Google Drive
+4. **Better error handling** - Verifies zip file exists before extraction
+5. **Verbose extraction** - Uses `unzip -o` instead of `unzip -q` to see errors
+6. **Path validation** - Checks if `dataset_raw` exists before processing
+7. **Flexible structure detection** - Handles both nested and flat folder structures
+8. **Annotation file validation** - Added explicit checks for annotation files with detailed error messages
+9. **JSON validation** - Verifies created COCO annotation files are valid
 
 **Additional Fix:** Fixed JSON syntax error (extra quote at line 224)
 
