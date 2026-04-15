@@ -60,7 +60,15 @@ class DocumentDetector:
         
         # Load model
         if model_path is None:
-            model_path = Path(__file__).parent.parent.parent / "models" / "yolox_document.onnx"
+            # Try multiple model names for compatibility
+            models_dir = Path(__file__).parent.parent.parent / "models"
+            for name in ["yolox_idcard.onnx", "yolox_document.onnx"]:
+                candidate = models_dir / name
+                if candidate.exists():
+                    model_path = candidate
+                    break
+            if model_path is None:
+                model_path = models_dir / "yolox_idcard.onnx"
         
         self.model_path = str(model_path)
         self.session = None

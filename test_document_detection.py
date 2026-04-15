@@ -15,6 +15,9 @@ import cv2
 import numpy as np
 from pathlib import Path
 
+# Ensure cv2 doesn't crash in headless environments
+os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
@@ -62,7 +65,7 @@ def test_image(image_path, model_path, output_path=None, conf_threshold=0.5):
     # Detect
     print(f"\nRunning detection...")
     try:
-        result = detector.detect(image_rgb, conf_threshold=conf_threshold)
+        result = detector.detect_best(image_rgb)
         print("✅ Detection complete")
     except Exception as e:
         print(f"❌ Detection failed: {e}")
@@ -75,14 +78,14 @@ def test_image(image_path, model_path, output_path=None, conf_threshold=0.5):
     print(f"Detection Results:")
     print(f"{'='*60}")
     
-    if result.confidence > 0:
+    if result and result.confidence > 0:
         print(f"  ✅ Document detected!")
+        print(f"  Class: {result.class_name}")
         print(f"  Bounding Box: ({result.bbox[0]:.1f}, {result.bbox[1]:.1f}, {result.bbox[2]:.1f}, {result.bbox[3]:.1f})")
         print(f"  Confidence: {result.confidence:.3f} ({result.confidence*100:.1f}%)")
-        print(f"  Inference Time: {result.inference_time*1000:.1f}ms")
         
         # Visualize
-        vis_image = detector.visualize(image_rgb, result)
+        vis_image = detector.visualize(image_rgb, [result])
         
         # Save or display
         if output_path:
@@ -97,17 +100,20 @@ def test_image(image_path, model_path, output_path=None, conf_threshold=0.5):
         
         # Display (if available)
         try:
-            cv2.imshow("Document Detection", cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
-            print("\nPress any key to close...")
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-        except:
-            pass  # Headless environment
+            import os
+            if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
+                cv2.imshow("Document Detection", cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
+                print("\nPress any key to close...")
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+            else:
+                print("  (No display available, skipping cv2.imshow)")
+        except Exception as e:
+            print(f"  (Display error: {e})")
         
         return result
     else:
         print(f"  ❌ No document detected")
-        print(f"  Confidence: {result.confidence:.3f}")
         return None
 
 
@@ -156,11 +162,11 @@ def test_camera(model_path, conf_threshold=0.5):
         
         # Detect
         try:
-            result = detector.detect(frame_rgb, conf_threshold=conf_threshold)
+            result = detector.detect_best(frame_rgb)
             
             # Visualize
-            if result.confidence > 0:
-                vis_frame = detector.visualize(frame_rgb, result)
+            if result and result.confidence > 0:
+                vis_frame = detector.visualize(frame_rgb, [result])
                 
                 # Add FPS info
                 fps_text = f"Conf: {result.confidence:.2f}"
