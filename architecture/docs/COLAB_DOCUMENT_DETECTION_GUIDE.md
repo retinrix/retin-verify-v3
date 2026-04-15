@@ -529,7 +529,19 @@ drive.mount('/content/drive')
 
 ---
 
+
+### Issue: "RuntimeError: selected index k out of range" (epoch 85+)
+
+**Root Cause:** When mosaic augmentation is disabled in the final `no_aug_epochs` (default: last 15 epochs), random translation can shift bounding boxes outside the image. This causes SimOTA matching to find zero candidate anchors, and `torch.topk` crashes on an empty tensor.
+
+**Solution:**
+1. In your config, set `self.translate = 0.0` (already fixed in the latest notebook).
+2. Run the "CRITICAL PATCH: Fix YOLOX simota_matching" cell before training. This patches `yolox/models/yolo_head.py` to handle empty cost tensors gracefully.
+
+---
+
 ## Next Steps
+
 
 After successful training:
 

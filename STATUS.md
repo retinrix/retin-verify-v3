@@ -317,3 +317,45 @@ Training too slow	Ensure GPU is enabled (not CPU)
 Drive disconnects	Use drive.mount() with force_remount=True
 Low accuracy	Train more epochs (150-200)
 Ready to start? Open Colab and run the notebook! 🎯
+
+
+=================================================================================================
+14/04/2026
+=================================================================================================
+I found the exact root cause! prepare_colab_dataset.py has this code:
+
+# Create a default annotation (full image - you'll need to adjust this)
+margin = int(min(width, height) * 0.1)
+bbox = [margin, margin, width - 2*margin, height - 2*margin]
+It completely ignores XML annotations and creates fake center-cropped bboxes. That's why every training annotation is [416, 416, 8416, 3332] — it's just width * 0.9 × height * 0.9 with 10% margins.
+
+But you already have hand-annotated XML files in /mnt/d/dataset_280326/front and back with tight, precise bboxes. The fix is to rewrite prepare_colab_dataset.py to parse those XML files.
+
+Here's my plan:
+
+Rewrite prepare_colab_dataset.py to read LabelImg XML files from front/ and back/ folders
+Include no-card images as negative samples (no annotations)
+Map classes: id-front → class 0, id-back → class 1, or keep single class id_card
+Regenerate training/algerian_id_cards/ train/val splits with correct annotations
+Retrain YOLOX in Colab with proper data augmentation (mosaic, mixup, translate)
+Export new ONNX and replace the current model
+Let me write this to the plan file for your approval.
+
+==========================================================================================================
+15/04/2026
+==========================================================================================================
+Prompt for tomorrow:
+
+Continue the ID card detection project. I have finished annotating id-back and no-card images with LabelMe. The annotations are in data/collected/back/ and data/collected/no-card/ as JSON files. I also have id-front annotations from yesterday in data/collected/front/.
+
+Next steps:
+
+Convert all LabelMe polygon annotations to tight bounding boxes for YOLOX training
+Merge with the existing dataset and create train/val splits
+Update and run the Colab notebook to retrain YOLOX-M for 150 epochs
+Export the best model to ONNX and deploy it locally
+Please check the plan file at /home/retinrix/.kimi/plans/spider-man-sam-alexander-squirrel-girl.md for full context.
+
+Or simply:
+
+Continue from the saved plan. I have completed annotating back and no-card images with LabelMe. Ready to convert annotations, retrain YOLOX-M, and deploy the new model.

@@ -33,6 +33,9 @@ class DocumentDetector:
         input_size: Tuple[int, int] = (640, 640),
         confidence_threshold: float = 0.5,
         nms_threshold: float = 0.45,
+        min_aspect_ratio: float = 1.3,
+        max_aspect_ratio: float = 1.9,
+        min_box_area: float = 0.05,
     ):
         """
         Initialize document detector.
@@ -42,10 +45,18 @@ class DocumentDetector:
             input_size: Model input size (width, height)
             confidence_threshold: Minimum confidence for detection
             nms_threshold: NMS IoU threshold
+            min_aspect_ratio: Minimum width/height aspect ratio for a valid ID card
+            max_aspect_ratio: Maximum width/height aspect ratio for a valid ID card
+            min_box_area: Minimum detection area as fraction of image area
         """
         self.input_size = input_size
         self.confidence_threshold = confidence_threshold
         self.nms_threshold = nms_threshold
+        self.min_aspect_ratio = min_aspect_ratio
+        self.max_aspect_ratio = max_aspect_ratio
+        self.min_box_area = min_box_area
+        
+        self.class_names = {0: "id-front", 1: "id-back"}
         
         # Load model
         if model_path is None:
@@ -84,42 +95,52 @@ class DocumentDetector:
         print(f"Model loaded: {self.model_path}")
         print(f"Providers: {session_providers}")
     
-    def preprocess(self, image: np.ndarray) -> Tuple[np.ndarray, Tuple[float, float]]:
+    def preprocess(self, image: np.ndarray) -> Tuple[np.ndarray, Tuple[float, float], Tuple[float, float]]:
         """
-        Preprocess image for inference.
+        Preprocess image for inference using letterbox resize (same as YOLOX training).
         
         Args:
             image: Input image (BGR)
             
         Returns:
-            Tuple of (preprocessed image, scale factors)
+            Tuple of (preprocessed image, scale factors, padding offsets)
         """
         # Store original size
         orig_h, orig_w = image.shape[:2]
+        target_w, target_h = self.input_size
         
-        # Resize to model input size
-        resized = cv2.resize(image, self.input_size)
+        # Letterbox resize: scale to fit within target size, pad with gray
+        scale = min(target_w / orig_w, target_h / orig_h)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
         
-        # Normalize (YOLOX uses ImageNet normalization)
-        resized = resized.astype(np.float32) / 255.0
+        # Resize
+        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        # Create padded image (gray = 114, as YOLOX uses)
+        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+        
+        # Center the resized image
+        pad_x = (target_w - new_w) // 2
+        pad_y = (target_h - new_h) // 2
+        padded[pad_y:pad_y + new_h, pad_x:pad_x + new_w] = resized
         
         # Convert BGR to RGB
-        resized = resized[:, :, ::-1]
+        padded = padded[:, :, ::-1].copy()
         
         # Transpose to NCHW format
-        input_tensor = np.transpose(resized, (2, 0, 1))
+        input_tensor = np.transpose(padded, (2, 0, 1))
         input_tensor = np.expand_dims(input_tensor, axis=0)
+        input_tensor = input_tensor.astype(np.float32)
         
-        # Calculate scale factors
-        scale_w = orig_w / self.input_size[0]
-        scale_h = orig_h / self.input_size[1]
-        
-        return input_tensor, (scale_w, scale_h)
+        return input_tensor, (scale, scale), (pad_x, pad_y)
     
     def postprocess(
         self,
         outputs: np.ndarray,
-        scale_factors: Tuple[float, float],
+        scale: float,
+        pad_x: float,
+        pad_y: float,
         orig_shape: Tuple[int, int],
     ) -> List[DetectionResult]:
         """
@@ -127,13 +148,14 @@ class DocumentDetector:
         
         Args:
             outputs: Model raw outputs
-            scale_factors: (scale_w, scale_h)
+            scale: Resize scale factor
+            pad_x: Horizontal padding
+            pad_y: Vertical padding
             orig_shape: Original image shape (h, w)
             
         Returns:
             List of detection results
         """
-        scale_w, scale_h = scale_factors
         orig_h, orig_w = orig_shape
         
         # Parse outputs (YOLOX format: [num_boxes, 85] where 85 = x, y, w, h, obj_conf, 80 class_probs)
@@ -160,20 +182,43 @@ class DocumentDetector:
             if confidence < self.confidence_threshold:
                 continue
             
-            # Get box coordinates (center_x, center_y, width, height)
+            # Get box coordinates (center_x, center_y, width, height) in padded image space
             cx, cy, w, h = pred[0:4]
             
+            # Remove padding offset
+            cx -= pad_x
+            cy -= pad_y
+            
+            # Scale back to original image
+            cx /= scale
+            cy /= scale
+            w /= scale
+            h /= scale
+            
             # Convert to (x1, y1, x2, y2)
-            x1 = int((cx - w/2) * scale_w)
-            y1 = int((cy - h/2) * scale_h)
-            x2 = int((cx + w/2) * scale_w)
-            y2 = int((cy + h/2) * scale_h)
+            x1 = int(cx - w/2)
+            y1 = int(cy - h/2)
+            x2 = int(cx + w/2)
+            y2 = int(cy + h/2)
             
             # Clip to image bounds
             x1 = max(0, min(x1, orig_w - 1))
             y1 = max(0, min(y1, orig_h - 1))
             x2 = max(0, min(x2, orig_w - 1))
             y2 = max(0, min(y2, orig_h - 1))
+            
+            box_w = x2 - x1
+            box_h = y2 - y1
+            if box_h <= 0 or box_w <= 0:
+                continue
+            
+            aspect = box_w / box_h
+            if aspect < self.min_aspect_ratio or aspect > self.max_aspect_ratio:
+                continue
+            
+            area_ratio = (box_w * box_h) / (orig_w * orig_h)
+            if area_ratio < self.min_box_area:
+                continue
             
             boxes.append([x1, y1, x2, y2])
             scores.append(confidence)
@@ -203,7 +248,7 @@ class DocumentDetector:
                 bbox=tuple(boxes[idx]),
                 confidence=float(scores[idx]),
                 class_id=int(class_ids[idx]),
-                class_name="id_card"  # Single class for now
+                class_name=self.class_names.get(int(class_ids[idx]), "unknown")
             ))
         
         return results
@@ -221,7 +266,7 @@ class DocumentDetector:
         orig_shape = image.shape[:2]
         
         # Preprocess
-        input_tensor, scale_factors = self.preprocess(image)
+        input_tensor, (scale, _), (pad_x, pad_y) = self.preprocess(image)
         
         # Run inference
         outputs = self.session.run(
@@ -230,7 +275,7 @@ class DocumentDetector:
         )[0]
         
         # Postprocess
-        results = self.postprocess(outputs, scale_factors, orig_shape)
+        results = self.postprocess(outputs, scale, pad_x, pad_y, orig_shape)
         
         return results
     

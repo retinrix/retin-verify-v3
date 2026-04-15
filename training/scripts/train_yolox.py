@@ -147,6 +147,7 @@ class Exp(MyExp):
         # Input config
         self.input_size = (640, 640)
         self.test_size = (640, 640)
+        self.translate = 0.0  # FIX: prevent bbox out-of-bounds crash during no-aug phase
         self.mosaic_prob = 1.0
         self.mixup_prob = 0.5
         self.hsv_prob = 1.0

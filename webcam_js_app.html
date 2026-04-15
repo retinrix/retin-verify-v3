@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLOX Webcam Detection - JavaScript Only</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h1 { color: #00ff88; margin-bottom: 10px; font-size: 1.8rem; }
+        .subtitle { color: #888; margin-bottom: 20px; font-size: 0.95rem; }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            width: 100%;
+            max-width: 1400px;
+        }
+        .panel {
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 15px;
+            border: 1px solid #333;
+        }
+        .video-panel {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #webcam, #canvas {
+            border-radius: 8px;
+            max-width: 100%;
+            background: #000;
+        }
+        #canvas {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            pointer-events: none;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        button:hover { background: #0056b3; }
+        button:disabled { background: #444; cursor: not-allowed; }
+        .btn-green { background: #28a745; }
+        .btn-green:hover { background: #218838; }
+        .btn-red { background: #dc3545; }
+        .btn-red:hover { background: #c82333; }
+        .metrics {
+            min-width: 280px;
+            max-width: 350px;
+        }
+        .metric {
+            background: #252525;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .metric-label { color: #aaa; }
+        .metric-value { color: #00ff88; font-weight: 600; }
+        .detections-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .detection-item {
+            background: #252525;
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            border-left: 3px solid #00ff88;
+        }
+        .detection-item .conf { color: #ffd700; font-size: 0.9rem; }
+        .detection-item .bbox { color: #888; font-size: 0.85rem; margin-top: 4px; }
+        .no-detections {
+            color: #888;
+            text-align: center;
+            padding: 30px;
+            font-style: italic;
+        }
+        .status-bar {
+            margin-top: 15px;
+            padding: 10px 20px;
+            border-radius: 8px;
+            background: #252525;
+            text-align: center;
+        }
+        .status-active { color: #00ff88; }
+        .status-inactive { color: #ff4444; }
+        .hidden { display: none !important; }
+        .settings {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #333;
+        }
+        .settings label {
+            display: block;
+            margin-bottom: 10px;
+            color: #aaa;
+            font-size: 0.9rem;
+        }
+        .settings input[type="range"] {
+            width: 100%;
+            margin-top: 5px;
+        }
+        .settings select {
+            width: 100%;
+            padding: 8px;
+            background: #252525;
+            color: #fff;
+            border: 1px solid #444;
+            border-radius: 6px;
+            margin-top: 5px;
+        }
+        .mirror { transform: scaleX(-1); }
+    </style>
+</head>
+<body>
+    <h1>🎥 YOLOX Live Document Detection</h1>
+    <p class="subtitle">Pure JavaScript + Webcam — runs entirely in your browser</p>
+    
+    <div class="container">
+        <div class="panel video-panel">
+            <video id="webcam" width="640" height="480" autoplay playsinline muted></video>
+            <canvas id="canvas" width="640" height="480"></canvas>
+            
+            <div class="controls">
+                <button id="btnStart" class="btn-green">▶ Start Camera</button>
+                <button id="btnStop" class="btn-red" disabled>⏹ Stop</button>
+                <button id="btnCapture" disabled>📸 Capture</button>
+                <button id="btnMirror">↔️ Mirror</button>
+            </div>
+            
+            <div class="status-bar">
+                Status: <span id="statusText" class="status-inactive">● Camera off</span>
+                <span id="fpsText" style="margin-left: 20px; color: #888;"></span>
+            </div>
+            
+            <div class="settings">
+                <label>
+                    Confidence Threshold: <span id="confValue">0.50</span>
+                    <input type="range" id="confThreshold" min="0.1" max="0.9" step="0.05" value="0.5">
+                </label>
+                <label>
+                    Camera:
+                    <select id="cameraSelect">
+                        <option value="">Default camera</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+        
+        <div class="panel metrics">
+            <h3 style="margin-bottom: 15px; color: #00ff88;">📊 Metrics</h3>
+            <div class="metric">
+                <span class="metric-label">Detections</span>
+                <span class="metric-value" id="detCount">0</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Inference Time</span>
+                <span class="metric-value" id="infTime">—</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">FPS</span>
+                <span class="metric-value" id="fpsMetric">—</span>
+            </div>
+            
+            <h3 style="margin: 20px 0 15px; color: #00ff88;">📦 Detections</h3>
+            <div class="detections-list" id="detectionsList">
+                <div class="no-detections">Start camera to begin detection</div>
+            </div>
+        </div>
+    </div>
+    
+    <a id="downloadLink" class="hidden"></a>
+
+    <script>
+        // ============================================
+        // CONFIGURATION — UPDATE THIS WITH YOUR API
+        // ============================================
+        const API_URL = 'http://localhost:5000/detect';  // Change to your backend endpoint
+        
+        // ============================================
+        // DOM ELEMENTS
+        // ============================================
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const btnStart = document.getElementById('btnStart');
+        const btnStop = document.getElementById('btnStop');
+        const btnCapture = document.getElementById('btnCapture');
+        const btnMirror = document.getElementById('btnMirror');
+        const statusText = document.getElementById('statusText');
+        const fpsText = document.getElementById('fpsText');
+        const detCount = document.getElementById('detCount');
+        const infTime = document.getElementById('infTime');
+        const fpsMetric = document.getElementById('fpsMetric');
+        const detectionsList = document.getElementById('detectionsList');
+        const confThreshold = document.getElementById('confThreshold');
+        const confValue = document.getElementById('confValue');
+        const cameraSelect = document.getElementById('cameraSelect');
+        
+        let stream = null;
+        let isRunning = false;
+        let mirrored = false;
+        let animationId = null;
+        let lastFrameTime = 0;
+        let frameCount = 0;
+        let lastFpsTime = performance.now();
+        
+        // ============================================
+        // CAMERA SETUP
+        // ============================================
+        async function enumerateCameras() {
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const cameras = devices.filter(d => d.kind === 'videoinput');
+                cameraSelect.innerHTML = '<option value="">Default camera</option>';
+                cameras.forEach((cam, idx) => {
+                    const opt = document.createElement('option');
+                    opt.value = cam.deviceId;
+                    opt.text = cam.label || `Camera ${idx + 1}`;
+                    cameraSelect.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to enumerate cameras:', e);
+            }
+        }
+        
+        async function startCamera() {
+            try {
+                const constraints = {
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        deviceId: cameraSelect.value ? { exact: cameraSelect.value } : undefined
+                    },
+                    audio: false
+                };
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                isRunning = true;
+                btnStart.disabled = true;
+                btnStop.disabled = false;
+                btnCapture.disabled = false;
+                statusText.textContent = '● Camera on — detecting...';
+                statusText.className = 'status-active';
+                
+                // Match canvas to video size once loaded
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    video.width = video.videoWidth;
+                    video.height = video.videoHeight;
+                };
+                
+                detectLoop();
+            } catch (err) {
+                alert('Camera error: ' + err.message);
+                console.error(err);
+            }
+        }
+        
+        function stopCamera() {
+            isRunning = false;
+            if (stream) {
+                stream.getTracks().forEach(t => t.stop());
+                stream = null;
+            }
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            btnStart.disabled = false;
+            btnStop.disabled = true;
+            btnCapture.disabled = true;
+            statusText.textContent = '● Camera off';
+            statusText.className = 'status-inactive';
+            fpsText.textContent = '';
+            detCount.textContent = '0';
+            infTime.textContent = '—';
+            fpsMetric.textContent = '—';
+            detectionsList.innerHTML = '<div class="no-detections">Start camera to begin detection</div>';
+        }
+        
+        // ============================================
+        // DETECTION LOOP
+        // ============================================
+        async function detectLoop() {
+            if (!isRunning) return;
+            
+            const now = performance.now();
+            
+            // Throttle to ~15 FPS for backend/API calls
+            if (now - lastFrameTime >= 66) {
+                lastFrameTime = now;
+                await processFrame();
+            }
+            
+            // Calculate FPS
+            frameCount++;
+            if (now - lastFpsTime >= 1000) {
+                const fps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+                fpsMetric.textContent = fps + ' FPS';
+                fpsText.textContent = `(${fps} FPS)`;
+                frameCount = 0;
+                lastFpsTime = now;
+            }
+            
+            animationId = requestAnimationFrame(detectLoop);
+        }
+        
+        async function processFrame() {
+            // ============================================
+            // OPTION A: Call backend API for detection
+            // ============================================
+            // Uncomment and configure API_URL above to use backend
+            
+            /*
+            const blob = await captureFrameBlob();
+            const start = performance.now();
+            
+            try {
+                const formData = new FormData();
+                formData.append('image', blob, 'frame.jpg');
+                formData.append('conf', confThreshold.value);
+                
+                const res = await fetch(API_URL, { method: 'POST', body: formData });
+                const data = await res.json();
+                
+                const elapsed = Math.round(performance.now() - start);
+                infTime.textContent = elapsed + ' ms';
+                
+                drawDetections(data.detections || []);
+                updateDetectionsList(data.detections || []);
+            } catch (e) {
+                console.error('API call failed:', e);
+            }
+            */
+            
+            // ============================================
+            // OPTION B: Client-side mock detection (demo)
+            // ============================================
+            // This simulates detection for testing without backend.
+            // Replace with real API call above when backend is ready.
+            
+            drawMockDetection();
+        }
+        
+        // ============================================
+        // DRAWING
+        // ============================================
+        function drawDetections(detections) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (mirrored) {
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
+            
+            detections.forEach(det => {
+                const [x1, y1, x2, y2] = det.bbox;
+                const w = x2 - x1;
+                const h = y2 - y1;
+                
+                // Box
+                ctx.strokeStyle = '#00ff88';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x1, y1, w, h);
+                
+                // Label background
+                const label = `${det.class} ${(det.confidence * 100).toFixed(0)}%`;
+                ctx.font = 'bold 16px Arial';
+                const textWidth = ctx.measureText(label).width;
+                ctx.fillStyle = '#00ff88';
+                ctx.fillRect(x1, y1 - 24, textWidth + 10, 24);
+                
+                // Label text
+                ctx.fillStyle = '#000';
+                ctx.fillText(label, x1 + 5, y1 - 6);
+            });
+            
+            if (mirrored) ctx.restore();
+            
+            detCount.textContent = detections.length;
+        }
+        
+        function drawMockDetection() {
+            // Demo: draws a fake bounding box in center for visual testing
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            if (mirrored) {
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+            }
+            
+            // Draw a placeholder box in the center
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+            const bw = 240;
+            const bh = 150;
+            const x = cx - bw / 2;
+            const y = cy - bh / 2;
+            
+            ctx.strokeStyle = '#00ff88';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([8, 4]);
+            ctx.strokeRect(x, y, bw, bh);
+            ctx.setLineDash([]);
+            
+            const label = 'id_card (mock — connect backend)';
+            ctx.font = 'bold 14px Arial';
+            const tw = ctx.measureText(label).width;
+            ctx.fillStyle = '#00ff88';
+            ctx.fillRect(x, y - 22, tw + 10, 22);
+            ctx.fillStyle = '#000';
+            ctx.fillText(label, x + 5, y - 5);
+            
+            // Draw crosshair
+            ctx.strokeStyle = 'rgba(0, 255, 136, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx - 30, cy); ctx.lineTo(cx + 30, cy);
+            ctx.moveTo(cx, cy - 30); ctx.lineTo(cx, cy + 30);
+            ctx.stroke();
+            
+            if (mirrored) ctx.restore();
+            
+            detCount.textContent = '1 (mock)';
+            infTime.textContent = '—';
+            detectionsList.innerHTML = `
+                <div class="detection-item">
+                    <div><strong>id_card</strong> <span class="conf">0.0000 (mock)</span></div>
+                    <div class="bbox">bbox: (${Math.round(x)}, ${Math.round(y)}, ${Math.round(x+bw)}, ${Math.round(y+bh)})</div>
+                    <div class="bbox" style="color: #ff8800;">⚠ Connect backend API for real detection</div>
+                </div>
+            `;
+        }
+        
+        function updateDetectionsList(detections) {
+            if (detections.length === 0) {
+                detectionsList.innerHTML = '<div class="no-detections">No objects detected</div>';
+                return;
+            }
+            
+            detectionsList.innerHTML = detections.map(det => `
+                <div class="detection-item">
+                    <div><strong>${det.class}</strong> <span class="conf">${(det.confidence * 100).toFixed(1)}%</span></div>
+                    <div class="bbox">bbox: (${det.bbox.join(', ')})</div>
+                </div>
+            `).join('');
+        }
+        
+        async function captureFrameBlob() {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = video.videoWidth;
+            tempCanvas.height = video.videoHeight;
+            const tctx = tempCanvas.getContext('2d');
+            
+            if (mirrored) {
+                tctx.translate(tempCanvas.width, 0);
+                tctx.scale(-1, 1);
+            }
+            
+            tctx.drawImage(video, 0, 0);
+            
+            return new Promise(resolve => {
+                tempCanvas.toBlob(resolve, 'image/jpeg', 0.9);
+            });
+        }
+        
+        function captureImage() {
+            captureFrameBlob().then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.getElementById('downloadLink');
+                a.href = url;
+                a.download = 'capture_' + Date.now() + '.jpg';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+        
+        // ============================================
+        // EVENT LISTENERS
+        // ============================================
+        btnStart.addEventListener('click', startCamera);
+        btnStop.addEventListener('click', stopCamera);
+        btnCapture.addEventListener('click', captureImage);
+        btnMirror.addEventListener('click', () => {
+            mirrored = !mirrored;
+            video.classList.toggle('mirror', mirrored);
+        });
+        
+        confThreshold.addEventListener('input', () => {
+            confValue.textContent = parseFloat(confThreshold.value).toFixed(2);
+        });
+        
+        // Initialize
+        enumerateCameras();
+    </script>
+</body>
+</html>
