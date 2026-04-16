@@ -79,8 +79,8 @@ HTML_PAGE = """
         <button class="btn btn-capture" onclick="captureFrame()">📸 Capture Frame</button>
     </div>
     
-    <p class="note">Streaming with real-time object detection.<br>
-    For better performance, use a GPU.</p>
+    <p class="note">Inference runs asynchronously; displayed bboxes are always aligned<br>
+    with the frame they were computed on.</p>
     
     <script>
         let mirrored = false;
@@ -132,31 +132,36 @@ class VideoDetector:
         
         self.video_path = str(video_path)
         self.loop = loop
-        self.infer_every_n = infer_every_n
+        self.infer_every_n = max(1, infer_every_n)
+        
+        # Reduce internal buffer for lower latency
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
         self.frame_lock = threading.Lock()
+        self.display_lock = threading.Lock()
+        
+        # Aligned display frame + results
+        self.display_frame = None
+        self.display_frame_num = 0
+        self.display_infer_ms = 0.0
+        self.display_timestamp = 0.0
+        
+        # Raw reader state
         self.latest_frame = None
         self.frame_num = 0
         
-        self.fps = 0
-        self.infer_ms = 0
-        self.last_infer_time = 0
+        self.fps = 0.0
         self.running = True
+        self._last_stream_time = time.time()
         
-        self.infer_lock = threading.Lock()
-        self.latest_results = []
-        self.inferring = False
-        
-        # Start reader thread
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.reader_thread.start()
         
-        # Start inference thread
         self.infer_thread = threading.Thread(target=self._infer_loop, daemon=True)
         self.infer_thread.start()
     
     def _read_loop(self):
-        frame_count = 0
+        """Continuously read frames from video file."""
         while self.running:
             ret, frame = self.cap.read()
             if not ret:
@@ -167,49 +172,40 @@ class VideoDetector:
                 else:
                     break
             
-            frame_count += 1
             with self.frame_lock:
-                self.latest_frame = frame.copy()
-                self.frame_num = frame_count
+                self.latest_frame = frame
+                self.frame_num += 1
     
     def _infer_loop(self):
+        """Run inference asynchronously. Update display only with the inferred frame."""
+        local_count = 0
         while self.running:
             with self.frame_lock:
                 if self.latest_frame is None:
                     time.sleep(0.01)
                     continue
-                if self.frame_num % self.infer_every_n != 0:
-                    time.sleep(0.005)
-                    continue
+                current_count = self.frame_num
                 frame = self.latest_frame.copy()
-                current_frame = self.frame_num
             
-            if self.inferring:
-                time.sleep(0.005)
+            if current_count - local_count < self.infer_every_n:
+                time.sleep(0.002)
                 continue
+            local_count = current_count
             
-            self.inferring = True
             start = time.time()
             results = self.detector.detect(frame)
-            infer_time = time.time() - start
+            infer_ms = (time.time() - start) * 1000
             
-            with self.infer_lock:
-                self.latest_results = results
-                self.infer_ms = infer_time * 1000
-                self.last_infer_time = time.time()
+            vis_frame = self._draw_frame(frame, current_count, results, infer_ms)
             
-            self.inferring = False
+            with self.display_lock:
+                self.display_frame = vis_frame
+                self.display_frame_num = current_count
+                self.display_infer_ms = infer_ms
+                self.display_timestamp = time.time()
     
-    def _draw_frame(self, frame, current_frame):
-        with self.infer_lock:
-            results = list(self.latest_results)
-            infer_ms = self.infer_ms
-            last_infer = self.last_infer_time
-        
-        # Clear detections if inference is stale (> 300ms for video)
-        if time.time() - last_infer > 0.3:
-            results = []
-        
+    def _draw_frame(self, frame, frame_num, results, infer_ms):
+        """Draw detections and overlay on a specific frame."""
         vis_frame = self.detector.visualize(frame, results)
         
         h, w = vis_frame.shape[:2]
@@ -218,25 +214,28 @@ class VideoDetector:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(vis_frame, f"Inference: {infer_ms:.1f} ms", (10, 65),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        cv2.putText(vis_frame, f"Frame: {current_frame}", (10, 100),
+        cv2.putText(vis_frame, f"Frame: {frame_num}", (10, 100),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
         return vis_frame
     
     def get_processed_frame(self):
-        with self.frame_lock:
-            if self.latest_frame is None:
+        """Get the latest fully-processed frame (frame + bboxes are aligned)."""
+        with self.display_lock:
+            if self.display_frame is None:
+                with self.frame_lock:
+                    if self.latest_frame is not None:
+                        return self._draw_frame(self.latest_frame.copy(), self.frame_num, [], 0.0)
                 return None
-            frame = self.latest_frame.copy()
-            current_frame = self.frame_num
-        
-        vis_frame = self._draw_frame(frame, current_frame)
-        
-        # Estimate FPS from video properties
-        video_fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.fps = video_fps if video_fps > 0 else 25.0
-        
-        return vis_frame
+            
+            # If inference stalled for > 500ms, show current raw frame without old bboxes
+            stale = (time.time() - self.display_timestamp) > 0.5
+            if stale:
+                with self.frame_lock:
+                    if self.latest_frame is not None:
+                        return self._draw_frame(self.latest_frame.copy(), self.frame_num, [], 0.0)
+            
+            return self.display_frame.copy()
     
     def generate_frames(self):
         target_interval = 1.0 / 25
@@ -255,6 +254,8 @@ class VideoDetector:
                 now = time.time()
             last_frame_time = now
             
+            self.fps = 1.0 / max(elapsed, target_interval)
+            
             _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             frame_bytes = buffer.tobytes()
             
@@ -263,22 +264,18 @@ class VideoDetector:
                    b'Cache-Control: no-cache, no-store, must-revalidate\r\n\r\n' + frame_bytes + b'\r\n')
     
     def get_current_frame_jpg(self):
-        with self.frame_lock:
-            if self.latest_frame is None:
-                return None
-            frame = self.latest_frame.copy()
-            current_frame = self.frame_num
-        
-        vis_frame = self._draw_frame(frame, current_frame)
-        _, buffer = cv2.imencode('.jpg', vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        frame = self.get_processed_frame()
+        if frame is None:
+            return None
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         return buffer.tobytes()
     
     def get_metrics(self):
-        with self.infer_lock:
+        with self.display_lock:
             return {
                 "fps": self.fps,
-                "infer_ms": self.infer_ms,
-                "frame_num": self.frame_num,
+                "infer_ms": self.display_infer_ms,
+                "frame_num": self.display_frame_num,
             }
     
     def stop(self):
@@ -288,9 +285,9 @@ class VideoDetector:
         self.cap.release()
 
 
-def create_app(video_path, model_path, conf_threshold, loop=True):
+def create_app(video_path, model_path, conf_threshold, loop=True, skip=2):
     app = Flask(__name__)
-    detector = VideoDetector(video_path, model_path, conf_threshold, loop)
+    detector = VideoDetector(video_path, model_path, conf_threshold, loop, infer_every_n=skip)
     
     @app.route("/")
     def index():
@@ -364,7 +361,7 @@ def main():
     print(f"{'='*50}")
     
     try:
-        app = create_app(str(video_path), str(model_path), args.conf, loop=not args.no_loop)
+        app = create_app(str(video_path), str(model_path), args.conf, loop=not args.no_loop, skip=args.skip)
         print(f"\n🚀 Open http://{args.host}:{args.port} in your browser")
         print("Press Ctrl+C to stop\n")
         app.run(host=args.host, port=args.port, debug=False, threaded=True)

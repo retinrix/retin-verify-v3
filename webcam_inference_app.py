@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from collections import deque
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
@@ -80,8 +81,8 @@ HTML_PAGE = """
         <button class="btn btn-capture" onclick="captureFrame()">📸 Capture Frame</button>
     </div>
     
-    <p class="note">If the stream is slow, the model is running inference on every 3rd frame.<br>
-    For better performance, use a GPU or lower the input resolution.</p>
+    <p class="note">Inference runs asynchronously; displayed bboxes are always aligned<br>
+    with the frame they were computed on. For better performance, use a GPU.</p>
     
     <script>
         let mirrored = false;
@@ -143,27 +144,37 @@ class WebcamDetector:
         if not self.cap.isOpened():
             raise RuntimeError(f"Failed to open camera {camera_id}")
         
-        # Set resolution for better performance
+        # --- Speed up acquisition ---
+        # Reduce internal buffer so we always get the latest frame
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        # Prefer MJPEG for lower latency at moderate resolutions
+        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+        # Resolution: 640x480 is a good balance; drop to 480x360 if still slow
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        # Request higher FPS if the camera supports it
+        self.cap.set(cv2.CAP_PROP_FPS, 30)
         
+        self.infer_every_n = max(1, infer_every_n)
+        
+        # Threading primitives
         self.frame_lock = threading.Lock()
-        self.latest_frame = None
-        self.display_frame = None
+        self.display_lock = threading.Lock()
         
-        self.infer_every_n = infer_every_n
+        # The frame currently being shown (paired with its detections)
+        self.display_frame = None
+        self.display_results = []
+        self.display_infer_ms = 0.0
+        self.display_det_count = 0
+        self.display_timestamp = 0.0
+        
+        # Raw latest frame from camera (for inference to pick up)
+        self.latest_frame = None
         self.frame_count = 0
         
-        self.fps = 0
-        self.infer_ms = 0
-        self.detections_count = 0
-        self.last_infer_time = 0
-        
-        # Inference thread
-        self.infer_lock = threading.Lock()
-        self.latest_results = []
-        self.inferring = False
         self.running = True
+        self.fps = 0.0
+        self._last_stream_time = time.time()
         
         self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.capture_thread.start()
@@ -172,63 +183,55 @@ class WebcamDetector:
         self.infer_thread.start()
     
     def _capture_loop(self):
-        """Continuously capture frames from camera."""
+        """Continuously capture frames from camera. Drop old frames aggressively."""
         while self.running:
             ret, frame = self.cap.read()
             if ret:
                 with self.frame_lock:
-                    self.latest_frame = frame.copy()
+                    self.latest_frame = frame
                     self.frame_count += 1
     
     def _infer_loop(self):
-        """Run inference asynchronously on latest frame."""
+        """Run inference asynchronously. Only update display when inference finishes."""
+        local_count = 0
         while self.running:
+            # Grab the most recent frame
             with self.frame_lock:
                 if self.latest_frame is None:
-                    time.sleep(0.01)
-                    continue
-                # Only run inference every N frames
-                if self.frame_count % self.infer_every_n != 0:
                     time.sleep(0.005)
                     continue
+                current_count = self.frame_count
                 frame = self.latest_frame.copy()
             
-            # Skip if still processing previous frame
-            if self.inferring:
-                time.sleep(0.005)
+            # Frame skipping
+            if current_count - local_count < self.infer_every_n:
+                time.sleep(0.002)
                 continue
+            local_count = current_count
             
-            self.inferring = True
             start = time.time()
             results = self.detector.detect(frame)
-            infer_time = time.time() - start
+            infer_ms = (time.time() - start) * 1000
             
-            with self.infer_lock:
-                self.latest_results = results
-                self.infer_ms = infer_time * 1000
-                self.detections_count = len(results)
-                self.last_infer_time = time.time()
+            # Draw results ON THE FRAME THAT WAS ACTUALLY INFERRED
+            vis_frame = self._draw_frame(frame, results, infer_ms)
             
-            self.inferring = False
+            # Atomically update the display buffer
+            with self.display_lock:
+                self.display_frame = vis_frame
+                self.display_results = results
+                self.display_infer_ms = infer_ms
+                self.display_det_count = len(results)
+                self.display_timestamp = time.time()
     
-    def _draw_frame(self, frame):
-        """Draw detections on frame. Clear old detections if inference is stale."""
-        with self.infer_lock:
-            results = list(self.latest_results)
-            infer_ms = self.infer_ms
-            det_count = self.detections_count
-            last_infer = self.last_infer_time
-        
-        # Clear detections if no inference for > 500ms (card moved away)
-        if time.time() - last_infer > 0.5:
-            results = []
-        
+    def _draw_frame(self, frame, results, infer_ms):
+        """Draw detections and overlay on a specific frame."""
         vis_frame = self.detector.visualize(frame, results)
         
         # Add overlay info
         h, w = vis_frame.shape[:2]
         cv2.rectangle(vis_frame, (0, 0), (280, 80), (0, 0, 0), -1)
-        cv2.putText(vis_frame, f"Detections: {det_count}", (10, 25),
+        cv2.putText(vis_frame, f"Detections: {len(results)}", (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         cv2.putText(vis_frame, f"Inference: {infer_ms:.1f} ms", (10, 55),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
@@ -236,18 +239,25 @@ class WebcamDetector:
         return vis_frame
     
     def get_processed_frame(self):
-        """Get the latest frame with current detections drawn."""
-        with self.frame_lock:
-            if self.latest_frame is None:
+        """Get the latest fully-processed frame (frame + bboxes are aligned)."""
+        with self.display_lock:
+            if self.display_frame is None:
+                # Fallback: if inference hasn't finished even once, return raw camera frame
+                with self.frame_lock:
+                    if self.latest_frame is not None:
+                        return self.latest_frame.copy()
                 return None
-            frame = self.latest_frame.copy()
-        
-        vis_frame = self._draw_frame(frame)
-        
-        # Update stream FPS
-        self.fps = 30.0  # Cap is set to 30fps, we stream as fast as capture
-        
-        return vis_frame
+            
+            # If inference has stalled for > 800ms, fall back to raw frame
+            # so the user doesn't see a frozen image when card is removed
+            stale = (time.time() - self.display_timestamp) > 0.8
+            if stale:
+                with self.frame_lock:
+                    if self.latest_frame is not None:
+                        # Draw overlay without detections on current live frame
+                        return self._draw_frame(self.latest_frame.copy(), [], 0.0)
+            
+            return self.display_frame.copy()
     
     def generate_frames(self):
         """Generate MJPEG stream."""
@@ -268,7 +278,9 @@ class WebcamDetector:
                 now = time.time()
             last_frame_time = now
             
-            # Add cache-busting header via timestamp in boundary
+            # Compute actual stream FPS
+            self.fps = 1.0 / max(elapsed, target_interval)
+            
             _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             frame_bytes = buffer.tobytes()
             
@@ -277,22 +289,19 @@ class WebcamDetector:
                    b'Cache-Control: no-cache, no-store, must-revalidate\r\n\r\n' + frame_bytes + b'\r\n')
     
     def get_current_frame_jpg(self):
-        """Get current frame as JPEG for capture."""
-        with self.frame_lock:
-            if self.latest_frame is None:
-                return None
-            frame = self.latest_frame.copy()
-        
-        vis_frame = self._draw_frame(frame)
-        _, buffer = cv2.imencode('.jpg', vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        """Get current display frame as JPEG for capture."""
+        frame = self.get_processed_frame()
+        if frame is None:
+            return None
+        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         return buffer.tobytes()
     
     def get_metrics(self):
-        with self.infer_lock:
+        with self.display_lock:
             return {
                 "fps": self.fps,
-                "infer_ms": self.infer_ms,
-                "detections": self.detections_count,
+                "infer_ms": self.display_infer_ms,
+                "detections": self.display_det_count,
             }
     
     def stop(self):
@@ -302,9 +311,9 @@ class WebcamDetector:
         self.cap.release()
 
 
-def create_app(model_path, conf_threshold, camera_id=0):
+def create_app(model_path, conf_threshold, camera_id=0, skip=3):
     app = Flask(__name__)
-    webcam = WebcamDetector(model_path, conf_threshold, camera_id)
+    webcam = WebcamDetector(model_path, conf_threshold, camera_id, infer_every_n=skip)
     
     @app.route("/")
     def index():
@@ -370,7 +379,7 @@ def main():
     print(f"{'='*50}")
     
     try:
-        app = create_app(str(model_path), args.conf, args.camera)
+        app = create_app(str(model_path), args.conf, args.camera, skip=args.skip)
         print(f"\n🚀 Open http://{args.host}:{args.port} in your browser")
         print("Press Ctrl+C to stop\n")
         app.run(host=args.host, port=args.port, debug=False, threaded=True)
