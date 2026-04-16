@@ -177,12 +177,13 @@ class VideoDetector:
                 self.frame_num += 1
     
     def _infer_loop(self):
-        """Run inference asynchronously. Update display only with the inferred frame."""
+        """Run inference asynchronously. ALWAYS update display with the result,
+        even if empty, so we never hang on an old frame with bboxes."""
         local_count = 0
         while self.running:
             with self.frame_lock:
                 if self.latest_frame is None:
-                    time.sleep(0.01)
+                    time.sleep(0.005)
                     continue
                 current_count = self.frame_num
                 frame = self.latest_frame.copy()
@@ -228,8 +229,8 @@ class VideoDetector:
                         return self._draw_frame(self.latest_frame.copy(), self.frame_num, [], 0.0)
                 return None
             
-            # If inference stalled for > 500ms, show current raw frame without old bboxes
-            stale = (time.time() - self.display_timestamp) > 0.5
+            # If inference stalled for > 150ms, show current raw frame without old bboxes
+            stale = (time.time() - self.display_timestamp) > 0.15
             if stale:
                 with self.frame_lock:
                     if self.latest_frame is not None:
