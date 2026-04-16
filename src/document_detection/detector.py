@@ -322,9 +322,16 @@ class DocumentDetector:
             Image with visualizations
         """
         result = image.copy()
+        img_h, img_w = result.shape[:2]
         
         for det in detections:
             x1, y1, x2, y2 = det.bbox
+            
+            # Ensure box is within image bounds for drawing
+            x1 = max(0, min(x1, img_w - 1))
+            y1 = max(0, min(y1, img_h - 1))
+            x2 = max(0, min(x2, img_w - 1))
+            y2 = max(0, min(y2, img_h - 1))
             
             # Draw box
             cv2.rectangle(result, (x1, y1), (x2, y2), color, thickness)
@@ -333,18 +340,21 @@ class DocumentDetector:
             label = f"{det.class_name}: {det.confidence:.2f}"
             label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
             
-            y1_label = max(y1, label_size[1] + 10)
+            # Position label above box, clamped to image top
+            label_y = max(y1, label_size[1] + 4)
+            label_x = max(0, min(x1, img_w - label_size[0]))
+            
             cv2.rectangle(
                 result,
-                (x1, y1_label - label_size[1] - 10),
-                (x1 + label_size[0], y1_label),
+                (label_x, label_y - label_size[1] - 4),
+                (label_x + label_size[0], label_y + 2),
                 color,
                 -1
             )
             cv2.putText(
                 result,
                 label,
-                (x1, y1_label - 5),
+                (label_x, label_y),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.5,
                 (255, 255, 255),

@@ -15,3 +15,9 @@ training/test_dataset/
 models/best_ckpt*.pth
 models/*_old*.onnx
 models/*_broken.onnx
+logs/debug_*.jpg
+*.onnx.data
+models/*.pth:Zone.Identifier
+logs/debug_*.jpg
+*.onnx.data
+models/*.pth:Zone.Identifier

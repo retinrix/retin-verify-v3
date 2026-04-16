@@ -46,7 +46,7 @@ HTML_PAGE = """
         h1 { color: #00ff88; }
         .video-container { margin: 20px auto; border: 3px solid #00ff88; border-radius: 8px; display: inline-block; overflow: hidden; }
         .video-container img { max-width: 100%; height: auto; display: block; }
-        .metrics { background: #2a2a2a; padding: 15px; margin-top: 15px; border-radius: 8px; display: inline-block; }
+        .metrics { background: #2a2a2a; padding: 15px; margin-top: 15px; border-radius: 8px; display: inline-block; min-width: 250px; }
         .metric { margin: 8px 0; font-size: 16px; }
         .status { color: #00ff88; font-weight: bold; }
         .controls { margin: 20px 0; }
@@ -66,11 +66,12 @@ HTML_PAGE = """
     </div>
     
     <div class="metrics">
-        <div class="metric status">● Stream Active</div>
+        <div class="metric status" id="status">● Stream Active</div>
         <div class="metric">Model: <strong>{{ model_name }}</strong></div>
         <div class="metric">Confidence: <strong>{{ conf }}</strong></div>
-        <div class="metric">FPS: <strong id="fps">~{{ fps }}</strong></div>
-        <div class="metric">Frame: <strong id="frame">{{ frame_num }}</strong></div>
+        <div class="metric">Inference: <strong id="infer_ms">--</strong> ms</div>
+        <div class="metric">Stream FPS: <strong id="fps">--</strong></div>
+        <div class="metric">Frame: <strong id="frame">--</strong></div>
     </div>
     
     <div class="controls">
@@ -102,6 +103,17 @@ HTML_PAGE = """
                 })
                 .catch(e => alert('Capture failed: ' + e));
         }
+        
+        setInterval(() => {
+            fetch('/metrics')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('fps').textContent = data.fps.toFixed(1);
+                    document.getElementById('infer_ms').textContent = data.infer_ms.toFixed(1);
+                    document.getElementById('frame').textContent = data.frame_num;
+                })
+                .catch(() => {});
+        }, 500);
     </script>
 </body>
 </html>
@@ -109,7 +121,7 @@ HTML_PAGE = """
 
 
 class VideoDetector:
-    def __init__(self, video_path, model_path, conf_threshold, loop=True):
+    def __init__(self, video_path, model_path, conf_threshold, loop=True, infer_every_n=2):
         self.detector = DocumentDetector(
             model_path=model_path,
             confidence_threshold=conf_threshold
@@ -120,18 +132,31 @@ class VideoDetector:
         
         self.video_path = str(video_path)
         self.loop = loop
+        self.infer_every_n = infer_every_n
+        
         self.frame_lock = threading.Lock()
         self.latest_frame = None
         self.frame_num = 0
+        
         self.fps = 0
-        self.frame_time = 0
+        self.infer_ms = 0
+        self.last_infer_time = 0
         self.running = True
+        
+        self.infer_lock = threading.Lock()
+        self.latest_results = []
+        self.inferring = False
         
         # Start reader thread
         self.reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self.reader_thread.start()
+        
+        # Start inference thread
+        self.infer_thread = threading.Thread(target=self._infer_loop, daemon=True)
+        self.infer_thread.start()
     
     def _read_loop(self):
+        frame_count = 0
         while self.running:
             ret, frame = self.cap.read()
             if not ret:
@@ -142,9 +167,61 @@ class VideoDetector:
                 else:
                     break
             
+            frame_count += 1
             with self.frame_lock:
                 self.latest_frame = frame.copy()
-                self.frame_num += 1
+                self.frame_num = frame_count
+    
+    def _infer_loop(self):
+        while self.running:
+            with self.frame_lock:
+                if self.latest_frame is None:
+                    time.sleep(0.01)
+                    continue
+                if self.frame_num % self.infer_every_n != 0:
+                    time.sleep(0.005)
+                    continue
+                frame = self.latest_frame.copy()
+                current_frame = self.frame_num
+            
+            if self.inferring:
+                time.sleep(0.005)
+                continue
+            
+            self.inferring = True
+            start = time.time()
+            results = self.detector.detect(frame)
+            infer_time = time.time() - start
+            
+            with self.infer_lock:
+                self.latest_results = results
+                self.infer_ms = infer_time * 1000
+                self.last_infer_time = time.time()
+            
+            self.inferring = False
+    
+    def _draw_frame(self, frame, current_frame):
+        with self.infer_lock:
+            results = list(self.latest_results)
+            infer_ms = self.infer_ms
+            last_infer = self.last_infer_time
+        
+        # Clear detections if inference is stale (> 300ms for video)
+        if time.time() - last_infer > 0.3:
+            results = []
+        
+        vis_frame = self.detector.visualize(frame, results)
+        
+        h, w = vis_frame.shape[:2]
+        cv2.rectangle(vis_frame, (0, 0), (280, 110), (0, 0, 0), -1)
+        cv2.putText(vis_frame, f"Detections: {len(results)}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(vis_frame, f"Inference: {infer_ms:.1f} ms", (10, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(vis_frame, f"Frame: {current_frame}", (10, 100),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+        return vis_frame
     
     def get_processed_frame(self):
         with self.frame_lock:
@@ -153,55 +230,61 @@ class VideoDetector:
             frame = self.latest_frame.copy()
             current_frame = self.frame_num
         
-        start = time.time()
-        results = self.detector.detect(frame)
-        inference_time = time.time() - start
+        vis_frame = self._draw_frame(frame, current_frame)
         
-        vis_frame = self.detector.visualize(frame, results)
-        
-        cv2.putText(vis_frame, f"Detections: {len(results)}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(vis_frame, f"Inference: {inference_time*1000:.1f} ms", (10, 65),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        cv2.putText(vis_frame, f"Frame: {current_frame}", (10, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-        
-        self.frame_time = inference_time
-        self.fps = 1.0 / max(inference_time, 0.001)
+        # Estimate FPS from video properties
+        video_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.fps = video_fps if video_fps > 0 else 25.0
         
         return vis_frame
     
     def generate_frames(self):
+        target_interval = 1.0 / 25
+        last_frame_time = 0
+        
         while self.running:
             frame = self.get_processed_frame()
             if frame is None:
                 time.sleep(0.01)
                 continue
             
-            _, buffer = cv2.imencode('.jpg', frame)
+            now = time.time()
+            elapsed = now - last_frame_time
+            if elapsed < target_interval:
+                time.sleep(target_interval - elapsed)
+                now = time.time()
+            last_frame_time = now
+            
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             frame_bytes = buffer.tobytes()
             
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-            
-            # Throttle to avoid overwhelming the browser
-            time.sleep(0.03)
+                   b'Content-Type: image/jpeg\r\n'
+                   b'Cache-Control: no-cache, no-store, must-revalidate\r\n\r\n' + frame_bytes + b'\r\n')
     
     def get_current_frame_jpg(self):
         with self.frame_lock:
             if self.latest_frame is None:
                 return None
             frame = self.latest_frame.copy()
+            current_frame = self.frame_num
         
-        results = self.detector.detect(frame)
-        vis_frame = self.detector.visualize(frame, results)
-        
-        _, buffer = cv2.imencode('.jpg', vis_frame)
+        vis_frame = self._draw_frame(frame, current_frame)
+        _, buffer = cv2.imencode('.jpg', vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
         return buffer.tobytes()
+    
+    def get_metrics(self):
+        with self.infer_lock:
+            return {
+                "fps": self.fps,
+                "infer_ms": self.infer_ms,
+                "frame_num": self.frame_num,
+            }
     
     def stop(self):
         self.running = False
         self.reader_thread.join(timeout=1)
+        self.infer_thread.join(timeout=1)
         self.cap.release()
 
 
@@ -215,16 +298,23 @@ def create_app(video_path, model_path, conf_threshold, loop=True):
             HTML_PAGE,
             model_name=Path(model_path).name,
             conf=conf_threshold,
-            fps=round(detector.fps),
-            frame_num=detector.frame_num
         )
     
     @app.route("/video_feed")
     def video_feed():
         return Response(
             detector.generate_frames(),
-            mimetype='multipart/x-mixed-replace; boundary=frame'
+            mimetype='multipart/x-mixed-replace; boundary=frame',
+            headers={
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+            }
         )
+    
+    @app.route("/metrics")
+    def metrics():
+        return detector.get_metrics()
     
     @app.route("/capture")
     def capture():
@@ -243,10 +333,11 @@ def main():
     parser = argparse.ArgumentParser(description="Video file inference for YOLOX document detection")
     parser.add_argument("--video", "-v", required=True, help="Path to video file")
     parser.add_argument("--model", "-m", default="models/yolox_idcard.onnx", help="Path to ONNX model")
-    parser.add_argument("--conf", "-c", type=float, default=0.5, help="Confidence threshold")
+    parser.add_argument("--conf", "-c", type=float, default=0.3, help="Confidence threshold")
     parser.add_argument("--no-loop", action="store_true", help="Don't loop the video")
     parser.add_argument("--port", "-p", type=int, default=8080, help="Port to run the server on")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--skip", type=int, default=2, help="Run inference every N frames (default: 2)")
     args = parser.parse_args()
     
     video_path = Path(args.video)
@@ -269,6 +360,7 @@ def main():
     print(f"Model:  {model_path}")
     print(f"Conf:   {args.conf}")
     print(f"Loop:   {not args.no_loop}")
+    print(f"Skip:   {args.skip} frames")
     print(f"{'='*50}")
     
     try:
