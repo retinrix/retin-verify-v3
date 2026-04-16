@@ -31,10 +31,10 @@ class DocumentDetector:
         self,
         model_path: Optional[str] = None,
         input_size: Tuple[int, int] = (640, 640),
-        confidence_threshold: float = 0.5,
+        confidence_threshold: float = 0.3,
         nms_threshold: float = 0.45,
-        min_aspect_ratio: float = 1.3,
-        max_aspect_ratio: float = 1.9,
+        min_aspect_ratio: float = 1.0,
+        max_aspect_ratio: float = 2.5,
         min_box_area: float = 0.05,
     ):
         """

@@ -11,3 +11,7 @@ training/algerian_id_cards.zip
 training/algerian_id_cards/
 training/test_dataset/
 *.zip
+.onnx.data
+models/best_ckpt*.pth
+models/*_old*.onnx
+models/*_broken.onnx

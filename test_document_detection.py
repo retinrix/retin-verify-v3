@@ -100,7 +100,6 @@ def test_image(image_path, model_path, output_path=None, conf_threshold=0.5):
         
         # Display (if available)
         try:
-            import os
             if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
                 cv2.imshow("Document Detection", cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
                 print("\nPress any key to close...")
